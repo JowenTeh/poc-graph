@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react';
+import { forwardRef, memo, useEffect, useImperativeHandle, useState } from 'react';
 import Graph from "graphology";
 import { connectedComponents } from 'graphology-components';
 import { allSimplePaths } from 'graphology-simple-path';
@@ -16,12 +16,12 @@ import tinycolor from "tinycolor2";
 import citySvg from '../assets/city.svg';
 import userSvg from '../assets/user.svg';
 
-const Board = function Board(props) {
+const Board = forwardRef(function Board(props, ref) {
   const {
     children,
     graph,
     refGraph,
-    // node,
+    node: selectedNode,
     setNode,
     // neighbourNodes,
     setNeighbourNodes,
@@ -31,57 +31,138 @@ const Board = function Board(props) {
     selectedSuggestions,
   } = props;
 
-  let node = null;
+  let node = selectedNode;
   let neighbourNodes = new Set();
   let isDragging = false;
+
+  const addNode = (graph, key, attributes) => {
+    const x = 1;
+    const y = 1;
+    const size = 40;
+    let color;
+    let type;
+    let image;
+
+    if (attributes.category === 'person') {
+      color = 'purple';
+      type = 'image';
+      image = userSvg;
+    } else if (attributes.category === 'infringement') {
+      color = 'orange';
+      type = 'circle';
+    } else if (attributes.category === 'location') {
+      color = 'green';
+      type = 'circle';
+    }
+
+    graph.mergeNode(key, {
+      x,
+      y,
+      size,
+      color,
+      type,
+      image,
+      ...attributes,
+      renderedAt: Date.now(),
+    });
+  };
+
+  const addEdge = (graph, { source, target }, attributes) => {
+    const type = 'arrow';
+    const size = 8;
+
+    graph.mergeEdge(source, target, {
+      type,
+      size,
+      ...attributes,
+    });
+  };
+
+  const expandByLevel = (fromNode, level = 1) => {
+    const nodes = [];
+    bfsFromNode(refGraph, fromNode, (n, attr, depth) => {
+      if (depth > level) {
+        return true;
+      }
+
+      const edges = refGraph.edges(n);
+      console.log('bfsFromNode n:', n);
+      console.log('bfsFromNode edges:', edges);
+
+      if (!graph.hasNode(n)) {
+        const x = graph.getNodeAttribute(fromNode, 'x');
+        const y = graph.getNodeAttribute(fromNode, 'y');
+        addNode(graph, n, { ...refGraph.getNodeAttributes(n), x, y });
+        nodes.push(n);
+      }
+      edges.forEach((e) => {
+        const source = refGraph.source(e);
+        const target = refGraph.target(e);
+
+        if (graph.hasNode(source) && graph.hasNode(target)) {
+          addEdge(graph, { source, target }, refGraph.getEdgeAttributes(e));
+        }
+      });
+    }, { mode: 'directed' });
+
+    const positions = nodes.reduce((acc, node) => {
+      const { x: refX, y: refY} = refGraph.getNodeAttributes(node);
+      return Object.assign(acc, {
+        [node]: {
+          x: refX,
+          y: refY,
+        },
+      });
+    }, {});
+    animateNodes(graph, positions, { duration: 200, easing: "linear" });
+
+    return nodes;
+  };
+
+  const expandByNodes = (nodes = []) => {
+    // refGraph.filterNodes((node, attributes) => {
+    //   return nodes.includes(node);
+    // });
+    // const edges = [];
+    const positions = {};
+    nodes.forEach((node) => {
+      if (refGraph.hasNode(node) && !graph.hasNode(node)) {
+        // const x = graph.getNodeAttribute(fromNode, 'x');
+        // const y = graph.getNodeAttribute(fromNode, 'y');
+        const x = 0;
+        const y = 0;
+   
+        const attributes = refGraph.getNodeAttributes(node);
+        addNode(graph, node, { ...attributes, x, y });
+        Object.assign(positions, { [node]: { x: attributes.x, y: attributes.y } });
+   
+        const edges = refGraph.edges(node);
+   
+        edges.forEach((edge) => {
+          const source = refGraph.source(edge);
+          const target = refGraph.target(edge);
+
+          if (graph.hasNode(source) && graph.hasNode(target)) {
+            addEdge(graph, { source, target }, refGraph.getEdgeAttributes(edge));
+          }
+        });
+      }
+    });
+
+    animateNodes(graph, positions, { duration: 200, easing: "linear" });
+
+    return nodes;
+  }
+
+  useImperativeHandle(ref, () => ({
+    expandByLevel,
+    expandByNodes,
+  }));
 
   useEffect(() => {
     const container = document.getElementById('sigma-container');
     // const graph = new Graph();
     let hasNewNode = false;
-
-    const addNode = (graph, key, attributes) => {
-      const x = 1;
-      const y = 1;
-      const size = 40;
-      let color;
-      let type;
-      let image;
-
-      if (attributes.category === 'person') {
-        color = 'purple';
-        type = 'image';
-        image = userSvg;
-      } else if (attributes.category === 'infringement') {
-        color = 'orange';
-        type = 'circle';
-      } else if (attributes.category === 'location') {
-        color = 'green';
-        type = 'circle';
-      }
-
-      graph.mergeNode(key, {
-        x,
-        y,
-        size,
-        color,
-        type,
-        image,
-        ...attributes,
-        renderedAt: Date.now(),
-      });
-    };
-
-    const addEdge = (graph, { source, target }, attributes) => {
-      const type = 'arrow';
-      const size = 8;
-
-      graph.mergeEdge(source, target, {
-        type,
-        size,
-        ...attributes,
-      });
-    };
 
     const permutation = (xs) => {
       let ret = [];
@@ -314,6 +395,14 @@ const Board = function Board(props) {
       // graph.clear();
       // graph.import(refGraph);
     })();
+
+    (() => {
+      if (node && selectedSuggestions.includes('Expand 3 levels')) {
+        expandByLevel(node, 3);
+        neighbourNodes = new Set(graph.neighbors(node));
+        setNeighbourNodes(neighbourNodes);
+      }
+    })();
     // #endregion
 
     // #region Set nodes position
@@ -446,19 +535,26 @@ const Board = function Board(props) {
       //   if (edge === hoveredEdge) res.color = "#cc0000";
       //   return res;
       // },
+
+      // itemSizesReference: "positions",
+      // zoomToSizeRatioFunction: (x) => x,
+      minCameraRatio: 0.1,
+      maxCameraRatio: 10,
     });
     window.sigma = renderer;
 
     renderer.on("downNode", (e) => {
-      // console.log('downNode', e);
+      console.log('downNode', e);
       node = e.node;
       setNode(node);
 
       neighbourNodes = new Set(graph.neighbors(e.node))
       setNeighbourNodes(neighbourNodes);
 
-      isDragging = true;
-      setIsDragging(isDragging);
+      if (graph.size > 1) {
+        isDragging = true;
+        setIsDragging(isDragging);
+      }
 
       // graph.setNodeAttribute(node, "highlighted", true);
 
@@ -508,6 +604,7 @@ const Board = function Board(props) {
     // #region Add drag'n'drop feature
     // On mouse move, if the drag mode is enabled, we change the position of the draggedNode
     renderer.getMouseCaptor().on("mousemovebody", (e) => {
+      // console.log('mousemovebody');
       // console.log("mousemovebody", e);
       // console.log("mousemovebody isDragging", isDragging);
       if (!isDragging || !node) {
@@ -538,12 +635,13 @@ const Board = function Board(props) {
     // Disable the autoscale at the first down interaction
     renderer.getMouseCaptor().on("mousedown", () => {
       // TODO: Causing node rendering far away, commented until found better solution
-      if (!renderer.getCustomBBox()) {
-        renderer.setCustomBBox(renderer.getBBox());
-      }
-      // if (graph.order > 0 && !renderer.getCustomBBox()) {
+      // if (!renderer.getCustomBBox()) {
       //   renderer.setCustomBBox(renderer.getBBox());
       // }
+      if (isDragging && !renderer.getCustomBBox()) {
+        console.log('renderer.getBBox()', renderer.getBBox());
+        renderer.setCustomBBox(renderer.getBBox());
+      }
     });
     // #endregion
 
@@ -566,28 +664,32 @@ const Board = function Board(props) {
       if (graphNeighbors.length !== refGraphNeighbors.length) {
         console.log('refGraphNeighbors', refGraphNeighbors);
         // Expand
-        refGraphNeighbors.forEach((refGraphNode) => {
-          if (!graph.hasNode(refGraphNode)) {
-            addNode(graph, refGraphNode, { ...refGraph.getNodeAttributes(refGraphNode), x, y });
-            addedNodes.push(refGraphNode);
-          }
-          // if (!graph.hasEdge(node, refGraphNode) && !graph.hasEdge(refGraphNode, node)) {
-          //   if (refGraph.hasEdge(node, refGraphNode)) {
-          //     addEdge(graph, { source: node, target: refGraphNode }, refGraph.getEdgeAttributes(node, refGraphNode));
-          //   } else if (refGraph.hasEdge(refGraphNode, node)) {
-          //     addEdge(graph, { source: refGraphNode, target: node }, refGraph.getEdgeAttributes(refGraphNode, node));
-          //   }
-          // }
-          refGraph.neighbors(refGraphNode).forEach((n) => {
-            if (graph.hasNode(n)) {
-              if (refGraph.hasEdge(n, refGraphNode)) {
-                addEdge(graph, { source: n, target: refGraphNode }, refGraph.getEdgeAttributes(n, refGraphNode));
-              } else if (refGraph.hasEdge(refGraphNode, n)) {
-                addEdge(graph, { source: refGraphNode, target: n }, refGraph.getEdgeAttributes(refGraphNode, n));
-              }
-            }
-          });
-        });
+        // refGraphNeighbors.forEach((refGraphNode) => {
+        //   if (!graph.hasNode(refGraphNode)) {
+        //     addNode(graph, refGraphNode, { ...refGraph.getNodeAttributes(refGraphNode), x, y });
+        //     addedNodes.push(refGraphNode);
+        //   }
+        //   // if (!graph.hasEdge(node, refGraphNode) && !graph.hasEdge(refGraphNode, node)) {
+        //   //   if (refGraph.hasEdge(node, refGraphNode)) {
+        //   //     addEdge(graph, { source: node, target: refGraphNode }, refGraph.getEdgeAttributes(node, refGraphNode));
+        //   //   } else if (refGraph.hasEdge(refGraphNode, node)) {
+        //   //     addEdge(graph, { source: refGraphNode, target: node }, refGraph.getEdgeAttributes(refGraphNode, node));
+        //   //   }
+        //   // }
+        //   refGraph.neighbors(refGraphNode).forEach((n) => {
+        //     if (graph.hasNode(n)) {
+        //       if (refGraph.hasEdge(n, refGraphNode)) {
+        //         addEdge(graph, { source: n, target: refGraphNode }, refGraph.getEdgeAttributes(n, refGraphNode));
+        //       } else if (refGraph.hasEdge(refGraphNode, n)) {
+        //         addEdge(graph, { source: refGraphNode, target: n }, refGraph.getEdgeAttributes(refGraphNode, n));
+        //       }
+        //     }
+        //   });
+        // });
+
+        // addedNodes.push(...expandByLevel(e.node, 1));
+        expandByLevel(e.node, 1);
+
         // const positions = noverlap(graph, {
         //   maxIterations: 50,
         //   inputReducer: (key, attributes) => ({
@@ -623,31 +725,31 @@ const Board = function Board(props) {
         //   },
         // });
 
-        const positions = addedNodes.reduce((acc, node) => {
-          const { x: refX, y: refY} = refGraph.getNodeAttributes(node);
-          return Object.assign(acc, {
-            [node]: {
-              x: refX,
-              y: refY,
-            },
-          });
-        }, {});
-        // console.log('positions:', positions);
-        animateNodes(graph, positions, { duration: 200, easing: "linear" }, () => {
-          // const positions = noverlap(graph, {
-          //   maxIterations: 500,
-          //   inputReducer: (key, attributes) => ({
-          //     x: attributes.x,
-          //     y: attributes.y,
-          //     size: attributes.size
-          //   }),
-          //   settings: {
-          //     // gridSize: 10,
-          //     // ratio: 1,
-          //   },
-          // });
-          // animateNodes(graph, positions, { duration: 200, easing: "linear" });
-        });
+        // const positions = addedNodes.reduce((acc, node) => {
+        //   const { x: refX, y: refY} = refGraph.getNodeAttributes(node);
+        //   return Object.assign(acc, {
+        //     [node]: {
+        //       x: refX,
+        //       y: refY,
+        //     },
+        //   });
+        // }, {});
+        // // console.log('positions:', positions);
+        // animateNodes(graph, positions, { duration: 200, easing: "linear" }, () => {
+        //   // const positions = noverlap(graph, {
+        //   //   maxIterations: 500,
+        //   //   inputReducer: (key, attributes) => ({
+        //   //     x: attributes.x,
+        //   //     y: attributes.y,
+        //   //     size: attributes.size
+        //   //   }),
+        //   //   settings: {
+        //   //     // gridSize: 10,
+        //   //     // ratio: 1,
+        //   //   },
+        //   // });
+        //   // animateNodes(graph, positions, { duration: 200, easing: "linear" });
+        // });
       } else {
         // Collapse
         const positions = {};
@@ -731,6 +833,6 @@ const Board = function Board(props) {
       {/* {children} */}
     </div>
   )
-}
+});
 
 export default memo(Board);
