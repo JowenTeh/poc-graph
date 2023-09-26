@@ -123,7 +123,12 @@ const Board = forwardRef(function Board(props, ref) {
 
   const changeQuery = (query) => {
     if (!query) {
-      graph.current.clear();
+      const nodes = refGraph.current.filterNodes((node, attributes) => {
+        // return node =="p-001" || node =="p-002" || node =="o-001" || node =="o-002";
+        return node == "o-001";
+      });
+
+      expandByNodes(nodes);
     } else {
       const nodes = refGraph.current.filterNodes((node, attributes) => {
         const q = query.toLowerCase();
@@ -230,6 +235,7 @@ const Board = forwardRef(function Board(props, ref) {
 
       graph.current.setNodeAttribute(node, "x", pos.x);
       graph.current.setNodeAttribute(node, "y", pos.y);
+      console.log(pos.x, pos.y);
 
       // Prevent sigma to move camera:
       e.preventSigmaDefault();
