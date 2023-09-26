@@ -260,7 +260,7 @@ const Board = forwardRef(function Board(props, ref) {
     });
     // #endregion
 
-    renderer.on("doubleClickNode", (e) => {
+    renderer.on("clickNode", (e) => {
       node = e.node;
       setNode(node);
 
